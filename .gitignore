@@ -1,0 +1,11 @@
+ebin/
+deps/
+logs/
+doc/
+*.swp
+*.beam
+*.plt
+*.o
+*.so
+env.mk
+.erlang.mk

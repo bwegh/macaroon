@@ -292,7 +292,7 @@ verify_signature(#macaroon{identifier=Id,signature=Sig,caveats=Cav},Key) ->
 	Sig1 = hmac(Key,macaroon_kv:get_value(Id)),
     Sig2 = verify_caveat_signature(Cav,Sig1),
 	ExpSig = macaroon_kv:get_value(Sig),
-	{ExpSig =:= Sig2}.
+	ExpSig =:= Sig2.
 
 verify_macaroon(#macaroon{identifier=Id,signature=Sig,caveats=Cav}=M,Key,Discharges,TM,Verifier) ->
 	Sig1 = hmac(Key,macaroon_kv:get_value(Id)),

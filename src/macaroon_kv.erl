@@ -37,7 +37,7 @@ create(AKey,Value) ->
 	#kv{key=Key,value=Value,bin_rep=BinRep}.
 
 parse(Data) ->
-	case byte_size(Data) > ?PACKET_PREFIX of 
+	case byte_size(Data) >= ?PACKET_PREFIX of 
 		true ->
 			<<LengthEnc:?PACKET_PREFIX/binary,Rest/binary>> = Data,
 			<<LengthA:16/unsigned>> = hex_to_bin(binary:bin_to_list(LengthEnc)),
@@ -46,7 +46,11 @@ parse(Data) ->
 				true -> 
 					<<Enc:Length/binary,Return/binary>> = Rest,
 					[Key,Val] = binary:split(Enc,[<<" ">>],[trim]),
-					[Value] = binary:split(Val,[<<"\n">>],[trim,{scope,{byte_size(Val),-1}}]),
+                    SList = binary:split(Val,[<<"\n">>],[trim,{scope,{byte_size(Val),-1}}]),
+                    Value = case SList of 
+                                [V] -> V;
+                                [] -> <<>>
+                            end,
 					{#kv{key=Key,value=Value,bin_rep=to_bin_rep(Key,Value)},Return};
 				false ->
 					{error,not_enough_data}

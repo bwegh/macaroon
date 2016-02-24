@@ -121,11 +121,9 @@ deserialize(RawData) ->
 
 -spec inspect(Macaroon :: #macaroon{}) -> AsciiEncoded :: binary().
 inspect(#macaroon{identifier=Id,location=Loc,signature=Sig,caveats=Cav}) ->
-	LocInsp = macaroon_utils:kv_inspect(location,Loc),
-	IdInsp = macaroon_utils:kv_inspect(identifier,Id),
-	CavInsp = inspect_caveats(Cav,<<>>),
-	SigInsp = macaroon_utils:kv_inspect(signature,Sig),
-	<<LocInsp/binary,IdInsp/binary,CavInsp/binary,SigInsp/binary>>.
+    CavKVList = get_caveat_kvs(Cav,[]),
+    KVList = [{location,Loc},{identifier,Id}] ++ CavKVList ++ [{signature, Sig}],
+    macaroon_utils:inspect_kv_list(KVList).
 
 
 -spec create_verifier() -> #verifier{}.
@@ -200,12 +198,6 @@ build_macaroon([{cl,CaveatLoc},Next|Tail],#macaroon{signature=undefined,caveats=
 build_macaroon([{signature,Sig}],#macaroon{signature=undefined,caveats=Cav}=M) ->
 	M#macaroon{signature=Sig,caveats=lists:reverse(Cav)}.
 
-inspect_caveats([],Binary) ->
-	Binary;
-inspect_caveats([Cav|Tail],Binary) ->
-    CavBin = inspect_caveat(Cav),
-	inspect_caveats(Tail,<< Binary/binary, CavBin/binary >>).
-
 caveats_to_list([],List) ->
     lists:reverse(List);
 caveats_to_list([Cav|T],List) ->
@@ -225,20 +217,6 @@ caveat_to_map(#caveat{cid=Cid,vid=Vid,cl=Cl}) ->
 	end,
     maps:merge(CidMap,maps:merge(VidMap,ClMap)).
 
-
-inspect_caveat(#caveat{cid=Cid,vid=Vid,cl=Cl}) ->
-	CidInsp = case Cid of
-		Cid -> macaroon_utils:kv_inspect(cid,Cid)
-	end,
-	VidInsp = case Vid of 
-		undefined -> <<>>;
-		Vid -> macaroon_utils:kv_inspect(vid,Vid)
-	end,
-	ClInsp = case Cl of
-		undefined -> <<>>;
-		Cl -> macaroon_utils:kv_inspect(cl,Cl)
-	end,
-    <<CidInsp/binary,VidInsp/binary,ClInsp/binary>>.
 
 secretbox(_DataToCrypt, _Nonce, _Key) ->
 	erlang:error(nif_not_loaded).

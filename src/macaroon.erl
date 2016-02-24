@@ -23,7 +23,9 @@
 	get_signature/1,
 	get_identifier/1,
 	get_location/1,
-    get_caveats/1
+    get_caveats/1,
+    extract_info/1,
+    extract_info/2
 	]).
 
 
@@ -96,6 +98,29 @@ get_identifier(#macaroon{identifier=Id}) ->
 -spec get_caveats(#macaroon{}) -> [{term(), term(), term()}].
 get_caveats(#macaroon{caveats=Caveats}) ->
     caveats_to_list(Caveats,[]).
+
+-spec extract_info(#macaroon{}) -> map().
+extract_info(Macaroon) ->
+    extract_info(Macaroon,undefined).
+
+-spec extract_info(#macaroon{}, Key ::binary() | undefined) -> map().
+extract_info(Macaroon,VarKey) ->
+    #macaroon{identifier=Id,
+              signature=Sig,
+              location=Loc,
+              caveats=Cav} = Macaroon,
+	Key = generate_derived_key(VarKey),
+	Sig1 = hmac(Key,Id),
+    MacMap = #{identifier => Id,
+               in_signature => Sig,
+               signature => Sig1,
+               location => Loc,
+               caveats => []
+              },
+    extract_caveat_info(Cav,Key,MacMap).
+
+
+
 
 -spec prepare_for_request(TopMacaroon :: #macaroon{}, Discharge :: #macaroon{}) -> #macaroon{} | {error,badarg}.
 prepare_for_request( TM, #macaroon{signature=Sig,identifier=Id} = DischargeM ) ->
@@ -233,12 +258,43 @@ verify_raw(Macaroon,Key,Discharges,Verifier) ->
 	end.
 
 
+extract_caveat_info([],Key,MacMap) ->
+    #{signature := Sig,
+      in_signature := OrgSig,
+      caveats := Caveats
+     } = MacMap,
+    SigValid = (OrgSig =:= Sig),
+    NewInfo = #{caveats => lists:reverse(Caveats),
+                sig_valid => SigValid,
+                key => Key
+               }, 
+    maps:merge(MacMap,NewInfo);
+extract_caveat_info([#caveat{cid=Cid,vid=undefined} | Tail],Key,MacMap) ->
+    #{signature := Sig,
+      caveats := Caveats
+     } = MacMap,
+	NewSig = hash1(Sig,Cid),	
+    NewInfo = #{caveats => [#{cid=>Cid, vid=>undefined,cl=>undefined}|Caveats],
+                signature => NewSig
+               }, 
+    extract_caveat_info(Tail,Key,maps:merge(MacMap,NewInfo));
+extract_caveat_info([#caveat{cid=Cid,vid=Vid,cl=Cl} | Tail],Key,MacMap) ->
+    #{signature := Sig,
+      caveats := Caveats
+     } = MacMap,
+    VidKey = get_discharge_key(Vid,Sig),
+    NewSig = hash2(Sig,Vid,Cid), 
+    NewInfo = #{caveats => [#{cid=>Cid, vid=>Vid, cl=>Cl, vid_key=>VidKey}|Caveats],
+                signature => NewSig
+               }, 
+    extract_caveat_info(Tail,Key,maps:merge(MacMap,NewInfo)).
 
-verify_signature(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav},VarKey) ->
-	Key = generate_derived_key(VarKey),
-	Sig1 = hmac(Key,Id),
-    CalcSig = verify_caveat_signature(Cav,Sig1),
-	CalcSig =:= ExpSig.
+
+
+verify_signature(Macaroon,Key) ->
+    #{sig_valid := ValidSig} = extract_info(Macaroon,Key),
+    ValidSig.
+
 
 verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Discharges,TM,Verifier) ->
 	Sig1 = hmac(Key,Id),
@@ -268,10 +324,7 @@ verify_caveats([#caveat{cid=Cid,vid=Vid}|Tail],Signature,Discharges,TopMacaroon,
 	% third party caveat
 	case lists:keyfind(Cid,1,Discharges) of 
 		{Cid,Discharge} ->
-			<<Nonce:?SECRET_NONCE_BYTES/binary,EncKey/binary>> = Vid,
-			ZeroBits = ?SECRET_BOX_ZERO_BYTES *8,
-			CipherText = <<0:ZeroBits,EncKey/binary>>,
-			Key = secretbox_open(CipherText,Nonce,Signature),
+            Key = get_discharge_key(Vid,Signature),
 			Discharges1 = lists:keydelete(Cid,1,Discharges),
 			case verify_macaroon(Discharge,Key,Discharges1,TopMacaroon,Verifier) of
 				{true, Discharges2} ->
@@ -283,14 +336,13 @@ verify_caveats([#caveat{cid=Cid,vid=Vid}|Tail],Signature,Discharges,TopMacaroon,
 			throw(false)
 	end.
 
-verify_caveat_signature([],Signature) ->
-    Signature;
-verify_caveat_signature([#caveat{cid=Cid,vid=undefined}|Tail],Signature) ->
-	NewSig = hash1(Signature,Cid),	
-    verify_caveat_signature(Tail,NewSig);
-verify_caveat_signature([#caveat{cid=Cid,vid=Vid}|Tail],Signature) ->
-   	NewSig = hash2(Signature,Vid,Cid),
-    verify_caveat_signature(Tail,NewSig).
+get_discharge_key(_Vid,undefined) ->
+    undefined;
+get_discharge_key(Vid,Signature) ->
+    <<Nonce:?SECRET_NONCE_BYTES/binary,EncKey/binary>> = Vid,
+    ZeroBits = ?SECRET_BOX_ZERO_BYTES *8,
+    CipherText = <<0:ZeroBits,EncKey/binary>>,
+    secretbox_open(CipherText,Nonce,Signature).
 
 
 verify_predicate(Pred,#verifier{exact=Exact,general=General}) ->
@@ -331,12 +383,19 @@ contains_cid([#caveat{cid=Cid}|Tail],Id) ->
 			contains_cid(Tail,Id)
 	end.
 
+generate_derived_key(undefined) -> 
+    undefined;
 generate_derived_key(Key) -> 
 	hmac(<<"macaroons-key-generator">>,Key).
 
+
+hash1(undefined, _Data) ->
+    undefined;
 hash1(Key, Data) ->
 	hmac(Key,Data).
 
+hash2(undefined, _Data1, _Data2) ->
+    undefined;
 hash2(Key, Data1, Data2) ->
 	Hmac1 = hmac(Key,Data1),
 	Hmac2 = hmac(Key,Data2),

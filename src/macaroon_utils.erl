@@ -1,5 +1,9 @@
 -module(macaroon_utils). 
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -export([
          serialize_kv_list/1,
          parse_kv/1,
@@ -20,13 +24,13 @@
                     {cl,<<"cl">>}
                    ]).
 
--define(PACKET_PREFIX,4).
+-define(PREFIX_LENGTH,4).
 
 kv_to_bin(_AtomKey,undefined) ->
     <<>>;
 kv_to_bin(AtomKey,Value) ->
     Key = map_to_binary_key(AtomKey),
-	ByteLength = byte_size(Key) + byte_size(Value) + ?PACKET_PREFIX + 2,
+	ByteLength = byte_size(Key) + byte_size(Value) + ?PREFIX_LENGTH + 2,
 	HexLen = list_to_binary(io_lib:format("~4.16.0b",[ByteLength])),
 	Space = <<" ">>,
 	NL = <<"\n">>,
@@ -74,33 +78,37 @@ parse_kv(Data,KVList,MapToAtom) ->
     
 
 parse_single_kv(Data,MapToBin) ->
-    case byte_size(Data) >= ?PACKET_PREFIX of 
+    case byte_size(Data) > ?PREFIX_LENGTH of 
         true ->
-            <<LengthEnc:?PACKET_PREFIX/binary,Rest/binary>> = Data,
+            <<LengthEnc:?PREFIX_LENGTH/binary,Rest/binary>> = Data,
             case safe_hex_to_bin(LengthEnc) of
                 {ok, <<LengthA:16/unsigned>>} ->
-                    Length = LengthA - ?PACKET_PREFIX,
-                    case byte_size(Rest) >= Length of
-                        true -> 
-                            <<Enc:Length/binary,DataLeft/binary>> = Rest,
-                            [BinKey,Val] = binary:split(Enc,[<<" ">>],[trim]),
-                            Key = map_to_atom_key(BinKey,MapToBin),
-                            SList = binary:split(Val,[<<"\n">>],[trim,{scope,{byte_size(Val),-1}}]),
-                            Value = case SList of 
-                                        [V] -> V;
-                                        [] -> <<>>
-                                    end,
-
-                            {ok,{Key,Value},DataLeft};
-                        false ->
-                            {error,not_enough_data}
-                    end;
+                    Length = LengthA - ?PREFIX_LENGTH,
+                    parse_one_kv(Length,Rest,MapToBin);
                 {error,_} ->
                     {error, not_valid_kv}
             end;
 		false ->
 			{error,not_enough_data}
 	end.
+
+parse_one_kv(Length,Data,MapToBin) ->
+    case byte_size(Data) >= Length of
+        true -> 
+            <<Enc:Length/binary,DataLeft/binary>> = Data,
+            [BinKey,Val] = binary:split(Enc,[<<" ">>],[trim]),
+            Key = map_to_atom_key(BinKey,MapToBin),
+            SList = binary:split(Val,[<<"\n">>],[trim,{scope,{byte_size(Val),-1}}]),
+            Value = case SList of 
+                        [V] -> V;
+                        [] -> <<>>
+                    end,
+
+            {ok,{Key,Value},DataLeft};
+        false ->
+            {error,not_enough_data}
+    end.
+
 
 inspect_kv_list(List) ->
     inspect_kv_list(List,<<>>).
@@ -152,3 +160,16 @@ safe_hex_to_bin(Hex) ->
 hex_to_bin(BinaryHex) when is_binary(BinaryHex) ->
     hex_to_bin(binary_to_list(BinaryHex));
 hex_to_bin(Str) -> << << (erlang:list_to_integer([H], 16)):4 >> || H <- Str >>.
+
+
+
+-ifdef(TEST).
+
+kv_round_trip_test() ->
+    KVList = [{<<"id">>,<<"some value">>},{<<"location">>,<<"somewhere">>}],
+    KVSer = serialize_kv_list(KVList),
+    KVList2 = parse_kv(KVSer),
+    KVList == KVList2.
+
+
+-endif. 

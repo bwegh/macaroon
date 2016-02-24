@@ -2,6 +2,7 @@
 
 -export([
          kv_to_bin/2,
+         serialize_kv_list/1,
          kv_parse/1,
          kv_inspect/2,
          bin_to_hex/1,
@@ -20,6 +21,8 @@
 
 -define(PACKET_PREFIX,4).
 
+kv_to_bin(_AtomKey,undefined) ->
+    <<>>;
 kv_to_bin(AtomKey,Value) ->
     Key = map_to_binary_key(AtomKey),
 	ByteLength = byte_size(Key) + byte_size(Value) + ?PACKET_PREFIX + 2,
@@ -27,6 +30,17 @@ kv_to_bin(AtomKey,Value) ->
 	Space = <<" ">>,
 	NL = <<"\n">>,
 	<<HexLen/binary,Key/binary,Space/binary,Value/binary,NL/binary>>.
+
+serialize_kv_list(List) ->
+    serialize_kv_list(List,<<>>).
+
+serialize_kv_list([],Binary) ->
+    base64url:encode(Binary);
+serialize_kv_list([{K,V}|T],Binary) ->
+    KVBin = kv_to_bin(K,V),
+    NewBinary = << Binary/binary, KVBin/binary >>,
+    serialize_kv_list(T,NewBinary).
+    
 
 map_to_binary_key(Key) when is_binary(Key) ->
     Key;

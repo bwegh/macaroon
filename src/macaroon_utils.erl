@@ -3,7 +3,8 @@
 -export([
          kv_to_bin/2,
          serialize_kv_list/1,
-         kv_parse/1,
+         parse_kv/1,
+         parse_kv/2,
          kv_inspect/2,
          bin_to_hex/1,
          hex_to_bin/1
@@ -48,13 +49,31 @@ map_to_binary_key(AtomKey) ->
     {AtomKey, Key} = lists:keyfind(AtomKey,1,?KEYMAPPING),
     Key.
 
-map_to_atom_key(Key) when is_atom(Key) ->
+map_to_atom_key(Key,_) when is_atom(Key) ->
     Key;
-map_to_atom_key(BinKey) ->
+map_to_atom_key(BinKey,false) ->
+    BinKey;
+map_to_atom_key(BinKey,_) ->
     {Key, BinKey} = lists:keyfind(BinKey,2,?KEYMAPPING),
     Key.
 
-kv_parse(Data) ->
+parse_kv(Data) ->
+    parse_kv(Data,false).
+
+parse_kv(Data,MapToAtom) ->
+    parse_kv(Data,[],MapToAtom).
+                        
+parse_kv(<<>>,KVList,_MapToAtom) ->
+    {ok,lists:reverse(KVList)};
+parse_kv(Data,KVList,MapToAtom) ->
+    case parse_single_kv(Data,MapToAtom) of
+        {ok,KV,NewData} ->
+            parse_kv(NewData,[KV|KVList],MapToAtom);
+        {error,_} = E -> E
+    end.
+    
+
+parse_single_kv(Data,MapToBin) ->
 	case byte_size(Data) >= ?PACKET_PREFIX of 
 		true ->
 			<<LengthEnc:?PACKET_PREFIX/binary,Rest/binary>> = Data,
@@ -62,16 +81,16 @@ kv_parse(Data) ->
 			Length = LengthA - ?PACKET_PREFIX,
 			case byte_size(Rest) >= Length of
 				true -> 
-					<<Enc:Length/binary,Return/binary>> = Rest,
+					<<Enc:Length/binary,DataLeft/binary>> = Rest,
 					[BinKey,Val] = binary:split(Enc,[<<" ">>],[trim]),
-                    Key = map_to_atom_key(BinKey),
+                    Key = map_to_atom_key(BinKey,MapToBin),
                     SList = binary:split(Val,[<<"\n">>],[trim,{scope,{byte_size(Val),-1}}]),
                     Value = case SList of 
                                 [V] -> V;
                                 [] -> <<>>
                             end,
                     
-					{{Key,Value},Return};
+					{ok,{Key,Value},DataLeft};
 				false ->
 					{error,not_enough_data}
 			end;

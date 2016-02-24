@@ -28,16 +28,16 @@
 
 
 -record(macaroon, {
-		location = none,
-		identifier = none,
-		signature = none,
+		location = undefined,
+		identifier = undefined,
+		signature = undefined,
 		caveats = []
 		}).
 
 -record(caveat, {
-		cid = none,
-		vid = none,
-		cl = none
+		cid = undefined,
+		vid = undefined,
+		cl = undefined
 		}).
 
 -record(verifier, {
@@ -109,11 +109,9 @@ prepare_for_request( TM, #macaroon{signature=Sig,identifier=Id} = DischargeM ) -
 
 -spec serialize(Macaroon :: #macaroon{} ) -> Base64UrlEncoded :: binary().
 serialize(#macaroon{identifier=Id, location=Loc, signature=Sig, caveats=Cav}) ->
-    LocBin = macaroon_utils:kv_to_bin(location,Loc),
-    IdBin = macaroon_utils:kv_to_bin(identifier,Id),
-	CavBin = serialize_caveats(Cav,<<>>),
-	SigBin = macaroon_utils:kv_to_bin(signature,Sig),
-	base64url:encode(<<LocBin/binary,IdBin/binary,CavBin/binary,SigBin/binary>>).
+    CavKVList = get_caveat_kvs(Cav,[]),
+    KVList = [{location,Loc},{identifier,Id}] ++ CavKVList ++ [{signature, Sig}],
+    macaroon_utils:serialize_kv_list(KVList).
 
 -spec deserialize(Base64UrlEncoded :: binary()) -> #macaroon{}.
 deserialize(RawData) ->
@@ -174,21 +172,11 @@ add_third_party_caveat_raw(Location,Id,Key,#macaroon{caveats=Cavs, signature=Sig
 	NewCavs = Cavs ++ [#caveat{cid=Id,vid=Vid,cl=Location}],
 	Mac#macaroon{signature=NewSig,caveats=NewCavs}.
 
-serialize_caveats([],Bin) ->
-	Bin;
-serialize_caveats([#caveat{cid=Cid,vid=Vid,cl=Cl}|Tail],Bin) ->
-	CidBin = case Cid of 
-		Cid -> macaroon_utils:kv_to_bin(cid,Cid)
-	end,
-	VidBin = case Vid of 
-		none -> <<>>;
-		Vid -> macaroon_utils:kv_to_bin(vid,Vid)
-	end,
-	ClBin = case Cl of 
-		none -> <<>>;
-		Cl -> macaroon_utils:kv_to_bin(cl,Cl)
-	end,
-	serialize_caveats(Tail,<<Bin/binary,CidBin/binary,VidBin/binary,ClBin/binary>>).
+
+get_caveat_kvs([],KVList) ->
+	lists:reverse(KVList);
+get_caveat_kvs([#caveat{cid=Cid,vid=Vid,cl=Cl}|Tail],KVList) ->
+	get_caveat_kvs(Tail,[{cl,Cl},{vid,Vid},{cid,Cid}|KVList]).
 
 deserialize_raw(<<>>,KeyValues) ->
 	lists:reverse(KeyValues);
@@ -199,23 +187,23 @@ deserialize_raw(Buffer,KeyValues) ->
 build_macaroon(KVList) ->
 	build_macaroon(KVList,#macaroon{}).
 
-build_macaroon([{location,Loc}|Tail],#macaroon{location=none}=M) ->
+build_macaroon([{location,Loc}|Tail],#macaroon{location=undefined}=M) ->
 	build_macaroon(Tail,M#macaroon{location=Loc});
-build_macaroon([{identifier,Id}|Tail],#macaroon{identifier=none}=M) ->
+build_macaroon([{identifier,Id}|Tail],#macaroon{identifier=undefined}=M) ->
 	build_macaroon(Tail,M#macaroon{identifier=Id});
-build_macaroon([{cid,CaveatId},Next|Tail],#macaroon{signature=none,caveats=Cavs}=M) ->
+build_macaroon([{cid,CaveatId},Next|Tail],#macaroon{signature=undefined,caveats=Cavs}=M) ->
     C = #caveat{cid=CaveatId},
     M2 = M#macaroon{caveats=[C|Cavs]},
     build_macaroon([Next|Tail],M2);
-build_macaroon([{vid,CaveatVId},Next|Tail],#macaroon{signature=none,caveats=Cavs}=M) ->
+build_macaroon([{vid,CaveatVId},Next|Tail],#macaroon{signature=undefined,caveats=Cavs}=M) ->
     [C|CavTail] = Cavs,
     M2 = M#macaroon{caveats=[C#caveat{vid=CaveatVId}|CavTail]},
     build_macaroon([Next|Tail],M2);
-build_macaroon([{cl,CaveatLoc},Next|Tail],#macaroon{signature=none,caveats=Cavs}=M) ->
+build_macaroon([{cl,CaveatLoc},Next|Tail],#macaroon{signature=undefined,caveats=Cavs}=M) ->
     [C|CavTail] = Cavs,
     M2 = M#macaroon{caveats=[C#caveat{cl=CaveatLoc}|CavTail]},
     build_macaroon([Next|Tail],M2);
-build_macaroon([{signature,Sig}],#macaroon{signature=none,caveats=Cav}=M) ->
+build_macaroon([{signature,Sig}],#macaroon{signature=undefined,caveats=Cav}=M) ->
 	M#macaroon{signature=Sig,caveats=lists:reverse(Cav)}.
 
 inspect_caveats([],Binary) ->
@@ -234,11 +222,11 @@ caveat_to_map(#caveat{cid=Cid,vid=Vid,cl=Cl}) ->
 		Cid -> #{cid => Cid}
 	end,
 	VidMap = case Vid of 
-		none -> #{vid => <<"">>};
+		undefined -> #{vid => <<"">>};
 		Vid -> #{ vid => Vid}
 	end,
 	ClMap = case Cl of
-		none -> #{cl => <<"">>};
+		undefined -> #{cl => <<"">>};
 		Cl -> #{ cl => Cl}
 	end,
     maps:merge(CidMap,maps:merge(VidMap,ClMap)).
@@ -249,11 +237,11 @@ inspect_caveat(#caveat{cid=Cid,vid=Vid,cl=Cl}) ->
 		Cid -> macaroon_utils:kv_inspect(cid,Cid)
 	end,
 	VidInsp = case Vid of 
-		none -> <<>>;
+		undefined -> <<>>;
 		Vid -> macaroon_utils:kv_inspect(vid,Vid)
 	end,
 	ClInsp = case Cl of
-		none -> <<>>;
+		undefined -> <<>>;
 		Cl -> macaroon_utils:kv_inspect(cl,Cl)
 	end,
     <<CidInsp/binary,VidInsp/binary,ClInsp/binary>>.
@@ -266,7 +254,7 @@ secretbox_open(_CipherText, _Nonce, _Key) ->
 
 verify_raw(Macaroon,Key,Discharges,Verifier) ->
 	?SUGGESTED_SECRET_LENGTH = byte_size(Key),
-	try verify_macaroon(Macaroon,Key,create_discharge_list(Discharges,[]),none,Verifier) of
+	try verify_macaroon(Macaroon,Key,create_discharge_list(Discharges,[]),undefined,Verifier) of
 		{true,_} -> true;
 		_ -> false
 	catch 
@@ -284,12 +272,12 @@ verify_signature(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav},VarKey) -
 verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Discharges,TM,Verifier) ->
 	Sig1 = hmac(Key,Id),
 	TopMacaroon = case TM of 
-		none -> M;
+		undefined -> M;
 		TM -> TM 
 	end,
 	{Sig2,NewDischarges} = verify_caveats(Cav,Sig1,Discharges,TopMacaroon,Verifier),
 	CalcSig = case TM of 
-		none -> 
+		undefined -> 
 			% is the main macaroon, nothing else to do here
 			Sig2;
 		TM ->
@@ -300,7 +288,7 @@ verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Disc
 
 verify_caveats([],Signature,Discharges,_TopMacaroon,_Verifier) ->
 	{Signature,Discharges};
-verify_caveats([#caveat{cid=Cid,vid=none}|Tail],Signature,Discharges,TopMacaroon,Verifier) ->
+verify_caveats([#caveat{cid=Cid,vid=undefined}|Tail],Signature,Discharges,TopMacaroon,Verifier) ->
 	% first party caveat
 	ok = verify_predicate(Cid,Verifier),
 	NewSig = hash1(Signature,Cid),	
@@ -326,7 +314,7 @@ verify_caveats([#caveat{cid=Cid,vid=Vid}|Tail],Signature,Discharges,TopMacaroon,
 
 verify_caveat_signature([],Signature) ->
     Signature;
-verify_caveat_signature([#caveat{cid=Cid,vid=none}|Tail],Signature) ->
+verify_caveat_signature([#caveat{cid=Cid,vid=undefined}|Tail],Signature) ->
 	NewSig = hash1(Signature,Cid),	
     verify_caveat_signature(Tail,NewSig);
 verify_caveat_signature([#caveat{cid=Cid,vid=Vid}|Tail],Signature) ->
@@ -473,9 +461,9 @@ roundtrip_test() ->
 	Public = get_identifier(M5),
 	Location = get_location(M5),
 	[C1,C2,C3] = M5#macaroon.caveats,
-	#caveat{cid=Cav1, cl=none, vid=none} = C1,
-	#caveat{cid=Cav2, cl=none, vid=none} = C2,
-	#caveat{cid=Cav3, cl=none, vid=none} = C3,
+	#caveat{cid=Cav1, cl=undefined, vid=undefined} = C1,
+	#caveat{cid=Cav2, cl=undefined, vid=undefined} = C2,
+	#caveat{cid=Cav3, cl=undefined, vid=undefined} = C3,
 	Signature = get_signature(M5).
 
 simple_verify_test() ->

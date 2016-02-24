@@ -116,7 +116,7 @@ serialize(#macaroon{identifier=Id, location=Loc, signature=Sig, caveats=Cav}) ->
 -spec deserialize(Base64UrlEncoded :: binary()) -> #macaroon{}.
 deserialize(RawData) ->
 	Data = base64url:decode(RawData),
-	KVList = deserialize_raw(Data,[]),
+    {ok,KVList} = macaroon_utils:parse_kv(Data,true),
 	build_macaroon(KVList).
 
 -spec inspect(Macaroon :: #macaroon{}) -> AsciiEncoded :: binary().
@@ -177,12 +177,6 @@ get_caveat_kvs([],KVList) ->
 	lists:reverse(KVList);
 get_caveat_kvs([#caveat{cid=Cid,vid=Vid,cl=Cl}|Tail],KVList) ->
 	get_caveat_kvs(Tail,[{cl,Cl},{vid,Vid},{cid,Cid}|KVList]).
-
-deserialize_raw(<<>>,KeyValues) ->
-	lists:reverse(KeyValues);
-deserialize_raw(Buffer,KeyValues) ->
-	{KV,NewBuffer} = macaroon_utils:kv_parse(Buffer),
-	deserialize_raw(NewBuffer,[KV|KeyValues]).
 
 build_macaroon(KVList) ->
 	build_macaroon(KVList,#macaroon{}).

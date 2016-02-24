@@ -1,11 +1,10 @@
 -module(macaroon_utils). 
 
 -export([
-         kv_to_bin/2,
          serialize_kv_list/1,
          parse_kv/1,
          parse_kv/2,
-         kv_inspect/2,
+         inspect_kv_list/1,
          bin_to_hex/1,
          hex_to_bin/1
         ]).
@@ -98,6 +97,18 @@ parse_single_kv(Data,MapToBin) ->
 			{error,not_enough_data}
 	end.
 
+inspect_kv_list(List) ->
+    inspect_kv_list(List,<<>>).
+
+inspect_kv_list([],Binary) ->
+    Binary;
+inspect_kv_list([{K,V}|Tail],Binary) ->
+    KvBin = kv_inspect(K,V),
+    NewBinary = << Binary/binary, KvBin/binary >>,
+    inspect_kv_list(Tail,NewBinary).
+
+kv_inspect(_,undefined) ->
+    <<>>;
 kv_inspect(signature = AKey,Val) ->
     Key = map_to_binary_key(AKey),
     Value = bin_to_hex(Val),

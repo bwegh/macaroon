@@ -114,8 +114,7 @@ serialize(#macaroon{identifier=Id, location=Loc, signature=Sig, caveats=Cav}) ->
     macaroon_utils:serialize_kv_list(KVList).
 
 -spec deserialize(Base64UrlEncoded :: binary()) -> #macaroon{}.
-deserialize(RawData) ->
-	Data = base64url:decode(RawData),
+deserialize(Data) ->
     {ok,KVList} = macaroon_utils:parse_kv(Data,true),
 	build_macaroon(KVList).
 

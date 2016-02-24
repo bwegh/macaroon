@@ -64,7 +64,8 @@ map_to_atom_key(BinKey,_) ->
 parse_kv(Data) ->
     parse_kv(Data,false).
 
-parse_kv(Data,MapToAtom) ->
+parse_kv(EncData,MapToAtom) ->
+    Data = base64url:decode(EncData),
     parse_kv(Data,[],MapToAtom).
                         
 parse_kv(<<>>,KVList,_MapToAtom) ->
@@ -168,8 +169,8 @@ hex_to_bin(Str) -> << << (erlang:list_to_integer([H], 16)):4 >> || H <- Str >>.
 kv_round_trip_test() ->
     KVList = [{<<"id">>,<<"some value">>},{<<"location">>,<<"somewhere">>}],
     KVSer = serialize_kv_list(KVList),
-    KVList2 = parse_kv(KVSer),
-    KVList == KVList2.
+    {ok, KVList2} = parse_kv(KVSer),
+    KVList = KVList2.
 
 
 -endif. 

@@ -19,6 +19,7 @@
 -export([create_verifier/0]).
 -export([add_exact_satisfy/2]).
 -export([add_general_satisfy/2]).
+-export([bind_to_signature/2]).
 -export([
 	get_signature/1,
 	get_identifier/1,
@@ -149,6 +150,12 @@ inspect(#macaroon{identifier=Id,location=Loc,signature=Sig,caveats=Cav}) ->
     KVList = [{location,Loc},{identifier,Id}] ++ CavKVList ++ [{signature, Sig}],
     macaroon_utils:inspect_kv_list(KVList).
 
+
+-spec bind_to_signature(Macaroon :: #macaroon{}, Base64EncodedSignature :: binary()) -> #macaroon{}.
+bind_to_signature(#macaroon{signature=Sig}=M,MainSigBase64) ->
+    MainSig = base64url:decode(MainSigBase64),
+    NewSig = bind_to_signature(MainSig,Sig),
+    M#macaroon{signature=NewSig}.
 
 -spec create_verifier() -> #verifier{}.
 create_verifier() -> 
@@ -381,9 +388,14 @@ create_discharge_list([#macaroon{identifier=Id} = M|Tail],Result) ->
 
 
 bind_to_top_macaroon(#macaroon{signature=MainSig},DcSig) ->
+    bind_signature(MainSig,DcSig).
+
+bind_signature(TopMacaroonSig,DischargeMacaroonSig) ->
 	ZeroBits = 8 * ?SUGGESTED_SECRET_LENGTH,
-	hash2(<<0:ZeroBits>>,MainSig,DcSig).
-	
+	hash2(<<0:ZeroBits>>,TopMacaroonSig,DischargeMacaroonSig).
+
+
+
 
 contains_cid(#macaroon{caveats=Cavs},Id) when is_binary(Id) ->
 	contains_cid(Cavs,Id);

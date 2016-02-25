@@ -154,7 +154,7 @@ inspect(#macaroon{identifier=Id,location=Loc,signature=Sig,caveats=Cav}) ->
 -spec bind_to_signature(Macaroon :: #macaroon{}, Base64EncodedSignature :: binary()) -> #macaroon{}.
 bind_to_signature(#macaroon{signature=Sig}=M,MainSigBase64) ->
     MainSig = base64url:decode(MainSigBase64),
-    NewSig = bind_to_signature(MainSig,Sig),
+    NewSig = bind_signature(MainSig,Sig),
     M#macaroon{signature=NewSig}.
 
 -spec create_verifier() -> #verifier{}.

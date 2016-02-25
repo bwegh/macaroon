@@ -299,7 +299,7 @@ clear_vid_keys([],CaveatList) ->
 clear_vid_keys([#{vid := undefined } = Caveat|T],List) ->
     clear_vid_keys(T,[Caveat | List]);
 clear_vid_keys([Caveat|T],List) ->
-    CleanCaveat = maps:put(Caveat,vid_key,undefined),
+    CleanCaveat = maps:put(vid_key,undefined,Caveat),
     clear_vid_keys(T,[CleanCaveat |List]).
 
 

@@ -264,7 +264,7 @@ extract_caveat_info([],Key,MacMap) ->
       caveats := Caveats
      } = MacMap,
     SigValid = (OrgSig =:= Sig),
-    NewInfo = #{caveats => lists:reverse(Caveats),
+    NewInfo = #{caveats => clear_vid_keys_if_not_valid(Caveats,SigValid),
                 sig_valid => SigValid,
                 key => Key
                }, 
@@ -288,6 +288,17 @@ extract_caveat_info([#caveat{cid=Cid,vid=Vid,cl=Cl} | Tail],Key,MacMap) ->
                 signature => NewSig
                }, 
     extract_caveat_info(Tail,Key,maps:merge(MacMap,NewInfo)).
+
+clear_vid_keys_if_not_valid(Caveats,true) ->
+    lists:reverse(Caveats);
+clear_vid_keys_if_not_valid(Caveats,false) ->
+    clear_vid_keys(Caveats,[]).
+
+clear_vid_keys([],CaveatList) ->
+    CaveatList;
+clear_vid_keys([Caveat|T],List) ->
+    CleanCaveat = maps:put(Caveat,vid_key,undefined),
+    clear_vid_keys(T,[CleanCaveat |List]).
 
 
 

@@ -65,6 +65,13 @@ parse_kv(Data) ->
     parse_kv(Data,false).
 
 parse_kv(EncData,MapToAtom) ->
+    try do_parse_kv(EncData,MapToAtom) of
+        Res -> Res
+    catch
+        _:_ -> {error, internal}
+    end.
+
+do_parse_kv(EncData, MapToAtom) ->
     Data = base64url:decode(EncData),
     parse_kv(Data,[],MapToAtom).
                         

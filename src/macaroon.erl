@@ -20,7 +20,7 @@
 -export([verify_signature/2]).
 -export([create_verifier/0]).
 -export([add_exact_satisfy/2]).
--export([add_general_satisfy/2]).
+-export([add_general_satisfy/3]).
 -export([bind_to_signature/2]).
 -export([
 	get_signature/1,
@@ -177,9 +177,9 @@ create_verifier() ->
 add_exact_satisfy(Satisfy,#verifier{exact=Exact}=V) ->
 	V#verifier{exact=[Satisfy|Exact]}.
 
--spec add_general_satisfy(Satisfy :: fun(), Verifier::#verifier{}) -> NewVerifier::#verifier{}.
-add_general_satisfy(Satisfy,#verifier{general=General}=V) ->
-	V#verifier{general=[Satisfy|General]}.
+-spec add_general_satisfy(Name :: binary(), Satisfy :: fun(), Verifier::#verifier{}) -> NewVerifier::#verifier{}.
+add_general_satisfy(Name,Satisfy,#verifier{general=General}=V) ->
+	V#verifier{general=[{Name,Satisfy}|General]}.
 
 -spec verify(#macaroon{}, Key::binary(), #verifier{}) -> true | false.
 verify(Macaroon, VarKey, Verifier) ->
@@ -403,13 +403,13 @@ get_discharge_key(Vid,Signature) ->
 verify_predicate(Pred,#verifier{exact=Exact,general=General},LogPid) ->
 	case lists:member(Pred,Exact) of 
 		true -> 
-            macaroon_log:add(Pred,true,<<"Exact">>,LogPid),
+            macaroon_log:add(Pred,true,Pred,LogPid),
             ok;
 		false -> 
-			VFun = fun(GFun,Bool) ->
+			VFun = fun({Name,GFun},Bool) ->
 					case GFun(Pred) of
 						true -> 
-                            macaroon_log:add(Pred,true,<<"Verify Function">>,LogPid),
+                            macaroon_log:add(Pred,true,Name,LogPid),
                             true;
 						_ -> Bool
 					end
@@ -591,7 +591,7 @@ simple_verify_test() ->
 				_ -> false
 			end
 	end,
-	V2 = add_general_satisfy(TimeSatisfy,V1),
+	V2 = add_general_satisfy(<<"time">>,TimeSatisfy,V1),
 	true = verify(M3,Key,V2),
 	false = verify(M4,Key,V2),
 	ValidMails = [<<"alice@example.org">>,<<"jon@doe.org">>,<<"who@minds.eu">>],
@@ -602,7 +602,7 @@ simple_verify_test() ->
 				_ -> false
 			end
 	end,
-	V3 = add_general_satisfy(EmailSatisfy,V2),
+	V3 = add_general_satisfy(<<"Email">>,EmailSatisfy,V2),
 	true = verify(M4,Key,V3),
 
 	%change the signature so a different path will fail
@@ -646,7 +646,7 @@ advanced_verify_test() ->
 	TimeSatisfy = fun(Predicate) -> 
 			<<"time">> == lists:nth(1, binary:split(Predicate,[<<" < ">>],[trim]))
 	end,
-	V2 = add_general_satisfy(TimeSatisfy,V1),
+	V2 = add_general_satisfy(<<"Time">>,TimeSatisfy,V1),
 	true = verify(M4,Key,[D3],V2),
 	ok.
 
@@ -672,7 +672,7 @@ advanced_verify_with_log_test() ->
 	TimeSatisfy = fun(Predicate) -> 
 			<<"time">> == lists:nth(1, binary:split(Predicate,[<<" < ">>],[trim]))
 	end,
-	V2 = add_general_satisfy(TimeSatisfy,V1),
+	V2 = add_general_satisfy(<<"Time">>,TimeSatisfy,V1),
     {true,Log} = verify_with_log(M4,Key,[D3],V2),
     ct:log("log of the verification: ~p~n",[Log]),
 	ok.
@@ -761,7 +761,7 @@ external_data_verification_test() ->
 	TimeSatisfy = fun(Predicate) -> 
 		 	<<"time">> =:= lists:nth(1,binary:split(Predicate,[<<" < ">>],[trim]))
 	end,
-	V2 = add_general_satisfy(TimeSatisfy,V1),
+	V2 = add_general_satisfy(<<"Time">>,TimeSatisfy,V1),
 	true = verify(M,Key,[DP],V2),
 
 	% change the signature so the third caveat signature check will fail

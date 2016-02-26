@@ -16,6 +16,7 @@
 -export([inspect/1]).
 -export([verify/3]).
 -export([verify/4]).
+-export([verify_with_log/4]).
 -export([verify_signature/2]).
 -export([create_verifier/0]).
 -export([add_exact_satisfy/2]).
@@ -187,8 +188,17 @@ verify(Macaroon, VarKey, Verifier) ->
 -spec verify(#macaroon{}, Key::binary(), [#macaroon{}], #verifier{}) -> true | false.
 verify(Macaroon, VarKey, Discharges, Verifier) ->
 	Key = generate_derived_key(VarKey),
-	verify_raw(Macaroon,Key,Discharges,Verifier).
+	verify_raw(Macaroon,Key,Discharges,Verifier,undefined).
 	
+-spec verify_with_log(#macaroon{}, Key::binary(), [#macaroon{}], #verifier{}) -> true | false.
+verify_with_log(Macaroon, VarKey, Discharges, Verifier) ->
+    {ok,Pid} = macaroon_log:start_link(),
+	Key = generate_derived_key(VarKey),
+	Result = verify_raw(Macaroon,Key,Discharges,Verifier,Pid),
+    {ok, Log} = macaroon_log:get_log(Pid),
+    ok = macaroon_log:stop(Pid),
+    {Result,Log}.
+
 %%%%% INTERNAL %%%%%%%%%
 -spec create_raw(Location::binary(), Id::binary(), Key::binary()) -> #macaroon{}.
 create_raw(Location, Id, Key) ->
@@ -266,9 +276,10 @@ secretbox(_DataToCrypt, _Nonce, _Key) ->
 secretbox_open(_CipherText, _Nonce, _Key) ->
 	erlang:error(nif_not_loaded).
 
-verify_raw(Macaroon,Key,Discharges,Verifier) ->
+verify_raw(Macaroon,Key,Discharges,Verifier,LogPid) ->
 	?SUGGESTED_SECRET_LENGTH = byte_size(Key),
-	try verify_macaroon(Macaroon,Key,create_discharge_list(Discharges,[]),undefined,Verifier) of
+	try
+        verify_macaroon(Macaroon,Key,create_discharge_list(Discharges,[]),undefined,Verifier,LogPid) of
 		{true,_} -> true;
 		_ -> false
 	catch 
@@ -327,45 +338,58 @@ verify_signature(Macaroon,Key) ->
     ValidSig.
 
 
-verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Discharges,TM,Verifier) ->
-	Sig1 = hmac(Key,Id),
-	TopMacaroon = case TM of 
-		undefined -> M;
-		TM -> TM 
-	end,
-	{Sig2,NewDischarges} = verify_caveats(Cav,Sig1,Discharges,TopMacaroon,Verifier),
-	CalcSig = case TM of 
-		undefined -> 
-			% is the main macaroon, nothing else to do here
-			Sig2;
-		TM ->
-			bind_to_top_macaroon(TM,Sig2)
-	end,
-	{ExpSig =:= CalcSig,NewDischarges}.
+verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Discharges,TM,Verifier,LogPid) ->
+    Sig1 = hmac(Key,Id),
+    TopMacaroon = case TM of 
+                      undefined -> 
+                          macaroon_log:add(<<"Setting TopMacaroon">>,true,Id,LogPid),
+                          M;
+                      TM -> TM 
+                  end,
+    macaroon_log:add(<<"Starting Macaroon">>,true,Id,LogPid),
+    {Sig2,NewDischarges} =
+    verify_caveats(Cav,Sig1,Discharges,TopMacaroon,Verifier,LogPid),
+    CalcSig = case TM of 
+                  undefined -> 
+                      % is the main macaroon, nothing else to do here
+                      Sig2;
+                  TM ->
+                      macaroon_log:add(<<"BindToTopMacaroon">>,true,<<"">>,LogPid),
+                      bind_to_top_macaroon(TM,Sig2)
+              end,
+    macaroon_log:add(<<"Signature">>,CalcSig,Id,LogPid),
+    ValidSig = (ExpSig =:= CalcSig),
+    macaroon_log:add(<<"ValidSignature">>,ValidSig,Id,LogPid),
+    macaroon_log:add(<<"Ending Macaroon">>,true,Id,LogPid),
+    {ValidSig,NewDischarges}.
 		
 
-verify_caveats([],Signature,Discharges,_TopMacaroon,_Verifier) ->
+verify_caveats([],Signature,Discharges,_TopMacaroon,_Verifier,_LogPid) ->
 	{Signature,Discharges};
-verify_caveats([#caveat{cid=Cid,vid=undefined}|Tail],Signature,Discharges,TopMacaroon,Verifier) ->
+verify_caveats([#caveat{cid=Cid,vid=undefined}|Tail],Signature,Discharges,TopMacaroon,Verifier,LogPid) ->
 	% first party caveat
-	ok = verify_predicate(Cid,Verifier),
+	ok = verify_predicate(Cid,Verifier,LogPid),
 	NewSig = hash1(Signature,Cid),	
-	verify_caveats(Tail,NewSig,Discharges,TopMacaroon,Verifier);
-verify_caveats([#caveat{cid=Cid,vid=Vid}|Tail],Signature,Discharges,TopMacaroon,Verifier) ->
+	verify_caveats(Tail,NewSig,Discharges,TopMacaroon,Verifier,LogPid);
+verify_caveats([#caveat{cid=Cid,vid=Vid}|Tail],Signature,Discharges,TopMacaroon,Verifier,LogPid) ->
 	% third party caveat
 	case lists:keyfind(Cid,1,Discharges) of 
 		{Cid,Discharge} ->
             Key = get_discharge_key(Vid,Signature),
 			Discharges1 = lists:keydelete(Cid,1,Discharges),
-			case verify_macaroon(Discharge,Key,Discharges1,TopMacaroon,Verifier) of
+			case
+                verify_macaroon(Discharge,Key,Discharges1,TopMacaroon,Verifier,LogPid) of
 				{true, Discharges2} ->
 					NewSig = hash2(Signature,Vid,Cid), 
-					verify_caveats(Tail,NewSig,Discharges2,TopMacaroon,Verifier);
+					verify_caveats(Tail,NewSig,Discharges2,TopMacaroon,Verifier,LogPid);
 				_ -> throw(false)
 			end;
 		_ ->
 			throw(false)
 	end.
+
+
+
 
 get_discharge_key(_Vid,undefined) ->
     undefined;
@@ -376,19 +400,25 @@ get_discharge_key(Vid,Signature) ->
     secretbox_open(CipherText,Nonce,Signature).
 
 
-verify_predicate(Pred,#verifier{exact=Exact,general=General}) ->
+verify_predicate(Pred,#verifier{exact=Exact,general=General},LogPid) ->
 	case lists:member(Pred,Exact) of 
-		true -> ok;
+		true -> 
+            macaroon_log:add(Pred,true,<<"Exact">>,LogPid),
+            ok;
 		false -> 
 			VFun = fun(GFun,Bool) ->
 					case GFun(Pred) of
-						true -> true;
+						true -> 
+                            macaroon_log:add(Pred,true,<<"Verify Function">>,LogPid),
+                            true;
 						_ -> Bool
 					end
 			end,
 			case lists:foldl(VFun,false,General) of
 				true -> ok;
-				_ -> throw(false)
+				_ -> 
+                    macaroon_log:add(Pred,false,<<"nothing found">>,LogPid),
+                    throw(false)
 			end
 	end.
 
@@ -618,6 +648,33 @@ advanced_verify_test() ->
 	end,
 	V2 = add_general_satisfy(TimeSatisfy,V1),
 	true = verify(M4,Key,[D3],V2),
+	ok.
+
+
+advanced_verify_with_log_test() ->
+	Key = <<"this is our super secret key; only we should know it">>,
+	Public = <<"we used our secret key">>,	
+	Location = <<"http://mybank/">>,
+	M1 = create(Location, Public, Key),
+	M2 = add_first_party_caveat(<<"account = 3735928559">>,M1),
+	ThirdPartyKey = <<"this is some random generated key that is really secure.">>,
+	ThirdPartyLoc = <<"some great third party">>,
+	ThirdPartyId = <<"this should include: Caveat for 3rdPary, The ThridPartyKey and all encrypted">>,
+	M3 = add_third_party_caveat(ThirdPartyLoc,ThirdPartyId,ThirdPartyKey,M2),
+	M4 = deserialize(serialize(M3)),
+	V = create_verifier(),
+	V1 = add_exact_satisfy(<<"account = 3735928559">>,V), 
+	false = verify(M4,Key,V1),
+	D1 = create(<<"some location">>,ThirdPartyId,ThirdPartyKey),
+	D2 = add_first_party_caveat(<<"time < now+20">>,D1),
+	D3 = prepare_for_request(M3,D2),
+	false = verify(M4,Key,[D3],V1),
+	TimeSatisfy = fun(Predicate) -> 
+			<<"time">> == lists:nth(1, binary:split(Predicate,[<<" < ">>],[trim]))
+	end,
+	V2 = add_general_satisfy(TimeSatisfy,V1),
+    {true,Log} = verify_with_log(M4,Key,[D3],V2),
+    ct:log("log of the verification: ~p~n",[Log]),
 	ok.
 
 

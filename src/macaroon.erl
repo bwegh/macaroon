@@ -12,6 +12,7 @@
 -export([prepare_for_request/2]).
 -export([serialize/1]).
 -export([deserialize/1]).
+-export([deserialize_multiple/1]).
 -export([inspect/1]).
 -export([verify/3]).
 -export([verify/4]).
@@ -141,8 +142,18 @@ serialize(#macaroon{identifier=Id, location=Loc, signature=Sig, caveats=Cav}) ->
 
 -spec deserialize(Base64UrlEncoded :: binary()) -> #macaroon{}.
 deserialize(Data) ->
-    {ok,KVList} = macaroon_utils:parse_kv(Data,true),
+    [RawMacaroon] = binary:split(Data,[<<" ">>],[global,trim_all]),
+    {ok,KVList} = macaroon_utils:parse_kv(RawMacaroon,true),
 	build_macaroon(KVList).
+
+-spec deserialize_multiple(Base64UrlEncoded :: binary()) -> [#macaroon{}].
+deserialize_multiple(Data) ->
+    RawMacaroons = binary:split(Data,[<<",">>],[global,trim_all]),
+    BuildMacaroon = fun(RawMac,List) ->
+                            M = deserialize(RawMac),
+                            [M | List]
+                    end,
+    lists:reverse(lists:foldl(BuildMacaroon,[],RawMacaroons)).
 
 -spec inspect(Macaroon :: #macaroon{}) -> AsciiEncoded :: binary().
 inspect(#macaroon{identifier=Id,location=Loc,signature=Sig,caveats=Cav}) ->
@@ -500,6 +511,15 @@ parse_test() ->
 	Signature = get_signature(M),
 	Public = get_identifier(M).
 
+parse_with_whitespace_test() ->
+	Public = <<"we used our secret key">>,	
+	Location = <<"http://mybank/">>,
+	Signature = <<"e3d9e02908526c4c0039ae15114115d97fdd68bf2ba379b342aaf0f617d0552f">>,
+	M = deserialize(<<"  MDAxY2xvY2F0aW9uIGh0dHA6Ly9teWJhbmsvCjAwMjZpZGVudGlmaWVyIHdlIHVzZWQgb3VyIHNlY3JldCBrZXkKMDAyZnNpZ25hdHVyZSDj2eApCFJsTAA5rhURQRXZf91ovyujebNCqvD2F9BVLwo ">>),
+	Location = get_location(M),
+	Signature = get_signature(M),
+	Public = get_identifier(M).
+
 roundtrip_test() ->
 	Key = <<"this is our super secret key; only we should know it">>,
 	Public = <<"we used our secret key">>,	
@@ -692,5 +712,17 @@ external_data_verification_test() ->
 	false = verify(M2,Key,[DP],V2),
 	ok.
 
+deserialize_multiple_test() ->
+	MData = <<"MDAxY2xvY2F0aW9uIGh0dHA6Ly9teWJhbmsvCjAwMmNpZGVudGlmaWVyIHdlIHVzZWQgb3VyIG90aGVyIHNlY3JldCBrZXkKMDAxZGNpZCBhY2NvdW50ID0gMzczNTkyODU1OQowMDMwY2lkIHRoaXMgd2FzIGhvdyB3ZSByZW1pbmQgYXV0aCBvZiBrZXkvcHJlZAowMDUxdmlkILVaqZLlLyfSGbX3PIZUPfKdwVCmGyfb79lP2J8HUU1yQ-rbxcg28P4XAS08P5NCOMq8N8soheTseUvbXhAN7Q7cvXZNzaCf2gowMDFiY2wgaHR0cDovL2F1dGgubXliYW5rLwowMDJmc2lnbmF0dXJlIGBezWqD1UAVoap5EOr7q-hYepUUeRE-GiyUq82Eopg_Cg">>,
+	DPData = <<"MDAyMWxvY2F0aW9uIGh0dHA6Ly9hdXRoLm15YmFuay8KMDAzN2lkZW50aWZpZXIgdGhpcyB3YXMgaG93IHdlIHJlbWluZCBhdXRoIG9mIGtleS9wcmVkCjAwMjBjaWQgdGltZSA8IDIwMjAtMDEtMDFUMDA6MDAKMDAyZnNpZ25hdHVyZSBxp6zFSsFEjO9XPVEQeqngTREtoMNvDY-z7t3pDQhXnwo">>,
+
+    MultipleData = << MData/binary, <<", ">>/binary, DPData/binary >>,
+    [M,D1] = deserialize_multiple(MultipleData),
+
+	ExpMacInspect = <<"location http://mybank/\nidentifier we used our other secret key\ncid account = 3735928559\ncid this was how we remind auth of key/pred\nvid tVqpkuUvJ9IZtfc8hlQ98p3BUKYbJ9vv2U_YnwdRTXJD6tvFyDbw_hcBLTw_k0I4yrw3yyiF5Ox5S9teEA3tDty9dk3NoJ_a\ncl http://auth.mybank/\nsignature 605ecd6a83d54015a1aa7910eafbabe8587a951479113e1a2c94abcd84a2983f\n">>,
+    ExpD1Inspect = <<"location http://auth.mybank/\nidentifier this was how we remind auth of key/pred\ncid time < 2020-01-01T00:00\nsignature 71a7acc54ac1448cef573d51107aa9e04d112da0c36f0d8fb3eedde90d08579f\n">>,
+    ExpMacInspect = inspect(M),
+    ExpD1Inspect = inspect(D1),
+    ok.
 
 -endif. 

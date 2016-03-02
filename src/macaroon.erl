@@ -339,14 +339,14 @@ verify_signature(Macaroon,Key) ->
 
 
 verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Discharges,TM,Verifier,LogPid) ->
+    macaroon_log:begin_macaroon(Id,LogPid),
     Sig1 = hmac(Key,Id),
     TopMacaroon = case TM of 
                       undefined -> 
-                          macaroon_log:add(<<"Setting TopMacaroon">>,true,Id,LogPid),
+                          macaroon_log:add_text("setting as TopMacaroon",[],true,LogPid),
                           M;
                       TM -> TM 
                   end,
-    macaroon_log:add(<<"Starting Macaroon">>,true,Id,LogPid),
     {Sig2,NewDischarges} =
     verify_caveats(Cav,Sig1,Discharges,TopMacaroon,Verifier,LogPid),
     CalcSig = case TM of 
@@ -354,13 +354,12 @@ verify_macaroon(#macaroon{identifier=Id,signature=ExpSig,caveats=Cav}=M,Key,Disc
                       % is the main macaroon, nothing else to do here
                       Sig2;
                   TM ->
-                      macaroon_log:add(<<"BindToTopMacaroon">>,true,<<"">>,LogPid),
+                      macaroon_log:add_text("BindToTopMacaroon",[],true,LogPid),
                       bind_to_top_macaroon(TM,Sig2)
               end,
-    macaroon_log:add(<<"Signature">>,CalcSig,Id,LogPid),
     ValidSig = (ExpSig =:= CalcSig),
-    macaroon_log:add(<<"ValidSignature">>,ValidSig,Id,LogPid),
-    macaroon_log:add(<<"Ending Macaroon">>,true,Id,LogPid),
+    macaroon_log:add_text("validating signature ~s",[base64url:encode(CalcSig)],ValidSig,LogPid),
+    macaroon_log:end_macaroon(LogPid),
     {ValidSig,NewDischarges}.
 		
 
@@ -382,7 +381,9 @@ verify_caveats([#caveat{cid=Cid,vid=Vid}|Tail],Signature,Discharges,TopMacaroon,
 				{true, Discharges2} ->
 					NewSig = hash2(Signature,Vid,Cid), 
 					verify_caveats(Tail,NewSig,Discharges2,TopMacaroon,Verifier,LogPid);
-				_ -> throw(false)
+				_ -> 
+                    macaroon_log:add_text("discharge macaroon ~p missing",[Cid],false,LogPid), 
+                    throw(false)
 			end;
 		_ ->
 			throw(false)
@@ -403,13 +404,13 @@ get_discharge_key(Vid,Signature) ->
 verify_predicate(Pred,#verifier{exact=Exact,general=General},LogPid) ->
 	case lists:member(Pred,Exact) of 
 		true -> 
-            macaroon_log:add(Pred,true,Pred,LogPid),
+            macaroon_log:add_text("~p verified (exact)",[Pred],true,LogPid),
             ok;
 		false -> 
 			VFun = fun({Name,GFun},Bool) ->
 					case GFun(Pred) of
 						true -> 
-                            macaroon_log:add(Pred,true,Name,LogPid),
+                            macaroon_log:add_text("~p verified (by function ~p)",[Pred,Name],true,LogPid),
                             true;
 						_ -> Bool
 					end
@@ -417,7 +418,7 @@ verify_predicate(Pred,#verifier{exact=Exact,general=General},LogPid) ->
 			case lists:foldl(VFun,false,General) of
 				true -> ok;
 				_ -> 
-                    macaroon_log:add(Pred,false,<<"nothing found">>,LogPid),
+                    macaroon_log:add_text("~p can't be verified",[Pred],false,LogPid),
                     throw(false)
 			end
 	end.

@@ -100,7 +100,7 @@ convert_log([{text,Description,Result}|T],Level,OldNumber,Log) ->
 convert_log([end_macaroon|T],OldLevel,OldNumber,Log) ->
     Level = OldLevel - 1,
     Number = OldNumber +1,
-    Description = add_indentation(io_lib:format("Macarone DONE",[]),Level),
+    Description = add_indentation(io_lib:format("macaroon done",[]),Level),
     Entry = {Number, Description , true},
     convert_log(T,Level,Number,[Entry | Log]);
 convert_log([{begin_macaroon,Cid}|T],Level,OldNumber,Log) ->
